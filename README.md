@@ -84,6 +84,7 @@ The scripts used for running the bechmarked normalization methods and for making
 	-vmax,--variance_max	Maximal value of variance in log transcription quotient (default: 50)
 	-nbin,--number_of_bins	Number of bins for the variance in log transcription quotient  (default: 160)
 	-no_norm,--no_cell_size_normalization	Option to skip cell size normalization (default: false, choice: false,0,true,1)
+	-m,--mem-name	The name of a POSIX-style memory block. If set, the LTQ and LTQ data will be set here and not written to files.
 ```
 
 ## Installation
@@ -125,6 +126,20 @@ Sanity/bin/Sanity
 ```
 Sanity/bin/Sanity_macOS
 ```
+
+## Shared Memory Mode
+For large datasets with many cells, the bottleneck for Sanity analysis is often writing the LTQ data to files,
+and then reading those files into the analysis environment. Even on powerful machines, this step can take hours.
+
+To address this, we've added the option to run Sanity in shared memory mode. This approach requires an
+understanding of [POSIX-style memory mapping](https://w3.cs.jmu.edu/kirkpams/OpenCSF/Books/csf/html/ShMem.html).
+When data are transferred in this manner, the argument passed via `-m` should be a string beginning with `/`
+(eg: `/ltq_shm`). The allocated memory for each of the LTQ and LTQ errors will be of size 
+`sz=(n_cells * n_genes * sizeof(double))`, so the total allocated size will be `2*sz`. The memory block will be
+filled in the same order as the `log_transcription_quotients.txt`, followed by `ltq_error_bars.txt`. This means
+that the LTQ for gene _g_ in cell _c_ in a dataset with _nC_ cells and _nG_ genes can be found at 
+`shm_addr[(g*nC) + c]`, and the corresponding errors can be found at `shm_addr[(g*nC) + c + (nG*nC)]`. The axis
+labels for this matrix will not be written to shared memory, and should be managed by the calling program.
 
 ## Sanity_distance
 Compute cell-cell distances from Sanity output files. Needs extended outputs of Sanity (`-e 1` option).
