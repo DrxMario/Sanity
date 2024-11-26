@@ -328,7 +328,8 @@ void ReadMTX(string mtx_file, string gene_name_file, string cell_name_file, doub
 		token = strtok(NULL," ");
 		c = atoi(token);
 		token = strtok(NULL," ");
-		count = atoi(token);
+        // NB that cts may be in scientific notation - use strtod
+        count = (int)std::strtod(token, nullptr);
 
 		g = g-1;
 		c = c-1;
