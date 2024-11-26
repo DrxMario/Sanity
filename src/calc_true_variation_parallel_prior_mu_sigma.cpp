@@ -8,6 +8,12 @@
 #include <ctime>
 #include <iomanip>
 
+#include <iostream>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <ReadInputFiles.h>
 #include <FitFrac.h>
 #include <Digamma_Trigamma.h>
@@ -19,7 +25,7 @@ using namespace std;
 /***Function declarations ****/
 void get_gene_expression_level(double *n_c, double *N_c, double n, double vmin, double vmax, double &mu, double &var_mu, double *delta, double *var_delta, int C, int numbin, double a, double b, double *lik);
 double get_epsilon_2(double &d, double &v, double &n, double &f, double &a);
-void parse_argv(int argc,char** argv, string &in_file, string &gene_name_file, string &cell_name_file, string &in_file_extension, string &out_folder, int &N_threads, bool &print_extended_output, double &vmin, double &vmax, int &numbin, int &N_charm, bool &no_norm);
+void parse_argv(int argc,char** argv, string &in_file, string &gene_name_file, string &cell_name_file, string &in_file_extension, string &out_folder, int &N_threads, bool &print_extended_output, double &vmin, double &vmax, int &numbin, int &N_charm, bool &no_norm, string &mem_name);
 static void show_usage(void);
 
 int main (int argc, char** argv){
@@ -29,6 +35,7 @@ int main (int argc, char** argv){
 	string cell_name_file("none");
 	string in_file_extension("");
 	string out_folder("");
+	string mem_name("");
 	int N_threads(4);
 	bool print_extended_output(false);
 	double vmin = 0.001;
@@ -36,7 +43,10 @@ int main (int argc, char** argv){
 	int numbin = 160;
 	int N_char;
 	bool no_norm(false);
-	parse_argv(argc, argv, in_file, gene_name_file, cell_name_file, in_file_extension, out_folder, N_threads, print_extended_output, vmin, vmax, numbin, N_char, no_norm);
+	int ltq_shm_fd;
+	int shm_size;
+	double *ltq_ptr;
+	parse_argv(argc, argv, in_file, gene_name_file, cell_name_file, in_file_extension, out_folder, N_threads, print_extended_output, vmin, vmax, numbin, N_char, no_norm, mem_name);
 
 	// count Number of genes and cells
 	int G, C;
@@ -193,37 +203,75 @@ int main (int argc, char** argv){
 		get_gene_expression_level(n_c[g],N_c,n[g],vmin,vmax,mu[g],var_mu[g],delta[g],var_delta[g],C,numbin,a,b,lik[g]);
 	}
 
-	// Write output files
+	if (mem_name != ""){ // shared memory mode
+		// Set up shared memory
+		shm_size = sizeof(double) * C * G; // size per matrix for each of ltq and err
+		fprintf(stderr, "Allocating shared memory of size 2 * %d \n", shm_size);
 
-	cerr << "Print output\n";
-	// Write log expression table and error bars table
-	ofstream out_exp_lev, out_d_exp_lev;
-	out_exp_lev.open(out_folder + "log_transcription_quotients.txt",ios::out);
-	out_d_exp_lev.open(out_folder + "ltq_error_bars.txt",ios::out);
+		// Open the shared memory object
+		ltq_shm_fd = shm_open(mem_name.c_str(), O_CREAT | O_RDWR, 0666);
+		if (ltq_shm_fd == -1) {
+			perror("shm_open");
+			return 1;
+		}
+		
+		// Map the shared memory object into the process's address space
+		ltq_ptr = (double *)mmap(0,2*shm_size,PROT_READ | PROT_WRITE, MAP_SHARED, ltq_shm_fd, 0);
+		if (ltq_ptr == MAP_FAILED) {
+			perror("mmap");
+			return 1;
+		}
+		// Copy data into shared memory
 
-	out_exp_lev << "GeneID";
-	out_d_exp_lev << "GeneID";
-    for(c=0;c<C;c++){
-		out_exp_lev << "\t" << cell_names[c].c_str();
-		out_d_exp_lev << "\t" << cell_names[c].c_str();
-	}
-	out_exp_lev << "\n";
-	out_d_exp_lev << "\n";
+		cerr << "Writing LTQs and LTQ errors to shared memory\n";
+		// Write log expression table and error bars table
 
-	for(g=0;g<G;g++){
-	out_exp_lev << gene_names[g].c_str();
-	out_d_exp_lev << gene_names[g].c_str();
+		for(g=0;g<G;g++){
+			for(c=0;c<C;c++){
+				ltq_ptr[(g*C) + c] = mu[g] + delta[g][c];
+				ltq_ptr[(g*C) + c + (G*C)] = sqrt( var_mu[g] + var_delta[g][c] );
+			}
+		}
+		// Unmap and close the shared memory object
+		munmap(ltq_ptr, shm_size);
+		close(ltq_shm_fd);	
+	}  else { // file access mode
+		// Write output files
+
+		cerr << "Print output\n";
+		// Write log expression table and error bars table
+		ofstream out_exp_lev, out_d_exp_lev;
+		out_exp_lev.open(out_folder + "log_transcription_quotients.txt",ios::out);
+		out_d_exp_lev.open(out_folder + "ltq_error_bars.txt",ios::out);
+
+		out_exp_lev << "GeneID";
+		out_d_exp_lev << "GeneID";
 		for(c=0;c<C;c++){
-			out_exp_lev << "\t" << mu[g] + delta[g][c];
-			out_d_exp_lev << "\t" << sqrt( var_mu[g] + var_delta[g][c] );
+			out_exp_lev << "\t" << cell_names[c].c_str();
+			out_d_exp_lev << "\t" << cell_names[c].c_str();
 		}
-		if ( g != G-1 ){
-			out_exp_lev << "\n";
-			out_d_exp_lev << "\n";
+		out_exp_lev << "\n";
+		out_d_exp_lev << "\n";
+
+		for(g=0;g<G;g++){
+		out_exp_lev << gene_names[g].c_str();
+		out_d_exp_lev << gene_names[g].c_str();
+			for(c=0;c<C;c++){
+				out_exp_lev << "\t" << mu[g] + delta[g][c];
+				out_d_exp_lev << "\t" << sqrt( var_mu[g] + var_delta[g][c] );
+			}
+			if ( g != G-1 ){
+				out_exp_lev << "\n";
+				out_d_exp_lev << "\n";
+			}
 		}
+		out_exp_lev.close();
+		out_d_exp_lev.close();
+
+		// Unmap and close the shared memory object
+		munmap(ltq_ptr, shm_size);
+		close(ltq_shm_fd);	
 	}
-	out_exp_lev.close();
-	out_d_exp_lev.close();
 
 	if ( print_extended_output ){
 
@@ -532,7 +580,7 @@ double get_epsilon_2(double &d, double &v, double &n, double &f, double &a){
     return e*e;
 }
 
-void parse_argv(int argc,char** argv, string &in_file, string &gene_name_file, string &cell_name_file, string &in_file_extension, string &out_folder, int &N_threads, bool &print_extended_output, double &vmin, double &vmax, int &numbin, int &N_char, bool &no_norm){
+void parse_argv(int argc,char** argv, string &in_file, string &gene_name_file, string &cell_name_file, string &in_file_extension, string &out_folder, int &N_threads, bool &print_extended_output, double &vmin, double &vmax, int &numbin, int &N_char, bool &no_norm, string&mem_name){
 
     if (argc<2)
         show_usage();
@@ -558,10 +606,10 @@ void parse_argv(int argc,char** argv, string &in_file, string &gene_name_file, s
 		}
 	}
 
-	int N_param(10);
+	int N_param(11);
 	string extended_output("false");
 	string no_norm_str("false");
-    string to_find[10][2] = {{"-f", "--file"},
+    string to_find[11][2] = {{"-f", "--file"},
 							{"-d", "--destination"},
 							{"-n", "--n_threads"},
 							{"-e", "--extended_output"},
@@ -570,7 +618,8 @@ void parse_argv(int argc,char** argv, string &in_file, string &gene_name_file, s
 					    	{"-nbin", "--number_of_variance_bins"},
 							{"-mtx_genes","--mtx_gene_name_file"},
 							{"-mtx_cells","--mtx_cell_name_file"},
-							{"-no_norm","--no_cell_size_normalization"}};
+							{"-no_norm","--no_cell_size_normalization"},
+							{"-m", "--mem-name"}};
 
     int j;
     int idx;
@@ -594,6 +643,7 @@ void parse_argv(int argc,char** argv, string &in_file, string &gene_name_file, s
 				if(j==7) gene_name_file = argv[idx+1];
 				if(j==8) cell_name_file = argv[idx+1];
 				if(j==9) no_norm_str = argv[idx+1];
+				if(j==10) mem_name = argv[idx+1];
 
 				// add '/' to out_folder if not already
 				if( j == 1 && out_folder.back() != '/' )
@@ -651,6 +701,7 @@ static void show_usage(void)
          << "\t-vmin,--variance_min\tMinimal value of variance in log transcription quotient (default: 0.001)\n"
          << "\t-vmax,--variance_max\tMaximal value of variance in log transcription quotient (default: 50)\n"
          << "\t-nbin,--number_of_bins\tNumber of bins for the variance in log transcription quotient  (default: 160)\n"
-		 << "\t-no_norm,--no_cell_size_normalization\tOption to skip cell size normalization (default: false, choice: false,0,true,1)\n";
+		 << "\t-no_norm,--no_cell_size_normalization\tOption to skip cell size normalization (default: false, choice: false,0,true,1)\n"
+		 << "\t-m,--mem-name\tThe name of a POSIX-style memory block. If set, the LTQ and LTQ data will set here and not written to files.\n";
     exit(0);
 }
