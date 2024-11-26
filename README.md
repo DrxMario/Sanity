@@ -141,6 +141,11 @@ that the LTQ for gene _g_ in cell _c_ in a dataset with _nC_ cells and _nG_ gene
 `shm_addr[(g*nC) + c]`, and the corresponding errors can be found at `shm_addr[(g*nC) + c + (nG*nC)]`. The axis
 labels for this matrix will not be written to shared memory, and should be managed by the calling program.
 
+Please note the following about shared memory mode behavior:
+- `log_transcription_quotients.txt` and `ltq_error_bars.txt` will _not_ be written as files if a shared memory 
+location is set
+- extended outputs _will_ still be written as files if the `-e` flag is set
+
 ## Sanity_distance
 Compute cell-cell distances from Sanity output files. Needs extended outputs of Sanity (`-e 1` option).
 ### Input
