@@ -82,6 +82,28 @@ int main (int argc, char** argv){
 	string *gene_names = new string [G];
 	string *cell_names = new string [C];
 
+	// Prepare shared memory if necessary - fail early if cannot map
+	if (mem_name != ""){ // shared memory mode
+		// Set up shared memory
+		shm_size = sizeof(double) * C * G; // size per matrix for each of ltq and err
+		fprintf(stderr, "Allocating shared memory of size 2 * %d \n", shm_size);
+
+		// Open the shared memory object
+		ltq_shm_fd = shm_open(mem_name.c_str(), O_CREAT | O_RDWR, 0666);
+		if (ltq_shm_fd == -1) {
+			perror("shm_open");
+			return 1;
+		}
+		
+		// Map the shared memory object into the process's address space
+		ltq_ptr = (double *)mmap(0,2*shm_size,PROT_READ | PROT_WRITE, MAP_SHARED, ltq_shm_fd, 0);
+		if (ltq_ptr == MAP_FAILED) {
+			perror("mmap");
+			return 1;
+		}
+		// Copy data into shared memory
+	}
+
 	// Read input file
 	if (in_file_extension == "mtx"){
 		ReadMTX(in_file, gene_name_file, cell_name_file, n_c, N_c, n, gene_names, cell_names, N_rows, G, C, gene_idx);
@@ -204,25 +226,6 @@ int main (int argc, char** argv){
 	}
 
 	if (mem_name != ""){ // shared memory mode
-		// Set up shared memory
-		shm_size = sizeof(double) * C * G; // size per matrix for each of ltq and err
-		fprintf(stderr, "Allocating shared memory of size 2 * %d \n", shm_size);
-
-		// Open the shared memory object
-		ltq_shm_fd = shm_open(mem_name.c_str(), O_CREAT | O_RDWR, 0666);
-		if (ltq_shm_fd == -1) {
-			perror("shm_open");
-			return 1;
-		}
-		
-		// Map the shared memory object into the process's address space
-		ltq_ptr = (double *)mmap(0,2*shm_size,PROT_READ | PROT_WRITE, MAP_SHARED, ltq_shm_fd, 0);
-		if (ltq_ptr == MAP_FAILED) {
-			perror("mmap");
-			return 1;
-		}
-		// Copy data into shared memory
-
 		cerr << "Writing LTQs and LTQ errors to shared memory\n";
 		// Write log expression table and error bars table
 
