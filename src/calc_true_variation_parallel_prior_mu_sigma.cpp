@@ -667,7 +667,11 @@ void parse_argv(int argc,char** argv, string &in_file, string &gene_name_file, s
 		no_norm = true;
 
 	// Get input file extension
-	in_file_extension = in_file.substr(in_file.find(".")+1,in_file.length());
+	size_t p = in_file.rfind( '.' );
+	if ( p == string::npos || p == in_file.size() - 1 ) in_file_extension = "";
+	else in_file_extension = in_file.substr( p + 1 );
+
+	//in_file_extension = in_file.substr(in_file.find(".")+1,in_file.length());
 	cerr << "File type : " << in_file_extension << "\n";
 
 	// Get number of Character in first row, for iobuffer
